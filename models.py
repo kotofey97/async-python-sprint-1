@@ -1,3 +1,4 @@
+from pandas import DataFrame
 from pydantic import BaseModel
 
 
@@ -19,3 +20,12 @@ class ForecastsModel(BaseModel):
 class CityModel(BaseModel):
     city: str
     forecasts: ForecastsModel
+
+
+class DataCalculationResult(BaseModel):
+    city: DataFrame
+    daily_averages: DataFrame
+    averages: DataFrame
+
+    class Config:
+        arbitrary_types_allowed = True

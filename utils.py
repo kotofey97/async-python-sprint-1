@@ -1,3 +1,6 @@
+import logging
+from multiprocessing import Manager
+
 CITIES = {
     "MOSCOW": "https://code.s3.yandex.net/async-module/moscow-response.json",
     "PARIS": "https://code.s3.yandex.net/async-module/paris-response.json",
@@ -20,6 +23,10 @@ ERR_MESSAGE_TEMPLATE = "Something wrong. Please contact with mentor."
 MIN_MAJOR_PYTHON_VER = 3
 MIN_MINOR_PYTHON_VER = 9
 
+FILENAME = "aggregation.csv"
+START_HOURS = 9
+FINISH_HOUR = 19
+
 
 def check_python_version():
     import sys
@@ -33,3 +40,21 @@ def check_python_version():
                 MIN_MAJOR_PYTHON_VER, MIN_MINOR_PYTHON_VER
             )
         )
+
+
+def get_logger(name):
+    """Переопределим логгер."""
+    logger = logging.getLogger(name)
+    stream_handler = logging.StreamHandler()
+    logger.addHandler(stream_handler)
+    stream_formatter = logging.Formatter(
+        '[%(levelname)s] %(asctime)s - %(name)s.%(funcName)s: %(message)s')
+    stream_handler.setFormatter(stream_formatter)
+    logger.setLevel(logging.DEBUG)
+    return logger
+
+
+def get_queue():
+    """Очередь."""
+    manager = Manager()
+    return manager.Queue()

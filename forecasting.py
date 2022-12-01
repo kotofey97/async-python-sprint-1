@@ -1,21 +1,13 @@
-import logging
-import threading
-import subprocess
-from multiprocessing import cpu_count, Pool, Manager
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Pool, cpu_count
 
-from api_client import YandexWeatherAPI
-from tasks import (
-    DataFetchingTask,
-    DataCalculationTask,
-    DataAggregationTask,
-    DataAnalyzingTask,
-)
-from utils import CITIES
+from tasks import (DataAggregationTask, DataAnalyzingTask, DataCalculationTask,
+                   DataFetchingTask)
+from utils import (CITIES, FILENAME, FINISH_HOUR, START_HOURS, get_logger,
+                   get_queue)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-TASK_TIMEOUT = 30
 
 def forecast_weather():
     """
@@ -25,35 +17,30 @@ def forecast_weather():
     logger.debug("Thread workers count %s", count_workers)
     with ThreadPoolExecutor(max_workers=count_workers) as executor:
         futures = executor.map(DataFetchingTask.fetch, CITIES.keys())
-        data = list(futures)[:1]
+        data = list(futures)
 
-    manager = Manager()
-    # queue = multiprocessing.Queue()
-    queue = manager.Queue()
-    calculation = DataCalculationTask(queue=queue, hours_to_start=9, hours_to_finish=19)
+    queue = get_queue()
+    calculation = DataCalculationTask(
+        queue=queue,
+        time_from=START_HOURS,
+        time_till=FINISH_HOUR,
+    )
+    aggregation = DataAggregationTask(queue=queue, filename=FILENAME)
 
     workers_cpu = cpu_count() - 1
 
     with Pool(processes=workers_cpu) as pool:
+        tasks_timeout = len(CITIES)
         calculation_tasks = pool.map_async(calculation.calculate, data)
+        aggregation_task = pool.apply_async(aggregation.aggregate)
+        calculation_tasks.wait(timeout=tasks_timeout)
+        queue.put(None)
+        aggregation_task.wait()
 
-        calculation_tasks.wait(TASK_TIMEOUT)
-    print('dddddd', calculation_tasks.ready())
-
-
-    # city_name = "MOSCOW"
-    # data = DataFetchingTask.fetch(city_name)
-    # print("HHHH", data[0].forecasts)
-    # print("HHHH", len(data[0].forecasts.forecasts))
-    # print("HHHH", data['forecasts'])
-
-
-
-    # city_name = "MOSCOW"
-    # ywAPI = YandexWeatherAPI()
-    # resp = ywAPI.get_forecasting(city_name)
-    # print(resp)
-    # pass
+    analyze = DataAnalyzingTask(filename=FILENAME)
+    analyze.analyze()
+    comfortables = analyze.comfortables
+    logger.info("Confortable cities: %s", comfortables)
 
 
 if __name__ == "__main__":
