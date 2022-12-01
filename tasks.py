@@ -1,6 +1,7 @@
 import operator
 import os
 import sys
+from multiprocessing import Queue
 from typing import Any, List, Tuple
 
 import pandas as pd
@@ -27,10 +28,10 @@ class DataFetchingTask:
 class DataCalculationTask:
     """Вычисление погодных параметров."""
 
-    def __init__(self, queue, time_from, time_till) -> None:
-        self.queue = queue
-        self.time_from = time_from
-        self.time_till = time_till
+    def __init__(self, queue: Queue, time_from: int, time_till: int):
+        self.queue: Queue = queue
+        self.time_from: int = time_from
+        self.time_till: int = time_till
 
     def calculate(self, data):
         """Формирует результат для города."""
@@ -50,7 +51,7 @@ class DataCalculationTask:
         )
         self.queue.put(result)
 
-    def daily_stat(self, forecasts):
+    def daily_stat(self, forecasts: dict) -> df:
         """Вычисление средних значений по дням."""
         daily_averages = df(
             columns=["day_temp", "clear"],
@@ -82,7 +83,7 @@ class DataCalculationTask:
             daily_averages.loc["clear", day["date"]] = clearly_hours
         return daily_averages
 
-    def total_stat(self, data):
+    def total_stat(self, data: df) -> df:
         """Вычисление итоговых средних."""
         return df(
             data.mean(axis="columns", numeric_only=True).round(2).transpose(),
@@ -93,8 +94,8 @@ class DataCalculationTask:
 class DataAggregationTask:
     """Объединение вычисленных данных."""
 
-    def __init__(self, filename: str, queue):
-        self.queue = queue
+    def __init__(self, filename: str, queue: Queue):
+        self.queue: Queue = queue
         self.filename: str = self.remove_file_if_exist(filename)
 
     def remove_file_if_exist(self, filename: str) -> str:
@@ -110,7 +111,7 @@ class DataAggregationTask:
         while queue_item:
             logger.debug(
                 "DataCalculationResult for city %s get from queue",
-                queue_item.city.at[0, 'city'],
+                queue_item.city.at[0, "city"],
             )
             self.save_to_file(data=queue_item)
             queue_item = self.queue.get()
