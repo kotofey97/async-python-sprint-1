@@ -33,7 +33,7 @@ class DataCalculationTask:
         self.time_from: int = time_from
         self.time_till: int = time_till
 
-    def calculate(self, data):
+    def calculate(self, data: df):
         """Формирует результат для города."""
         forecasts = data.forecasts.dict()
         city_name = data.city
@@ -50,6 +50,7 @@ class DataCalculationTask:
             city_name,
         )
         self.queue.put(result)
+        return result
 
     def daily_stat(self, forecasts: dict) -> df:
         """Вычисление средних значений по дням."""
@@ -105,8 +106,11 @@ class DataAggregationTask:
             logger.debug("Old file removed %s", filename)
         return filename
 
-    def aggregate(self):
+    def aggregate(self, data: df = None):
         """Соединение данных."""
+        if data:
+            return self.save_to_file(data=data)
+
         queue_item = self.queue.get()
         while queue_item:
             logger.debug(
