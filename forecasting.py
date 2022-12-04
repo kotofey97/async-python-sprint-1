@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Pool, cpu_count
 
+from api_client import YandexWeatherAPI
 from tasks import (DataAggregationTask, DataAnalyzingTask, DataCalculationTask,
                    DataFetchingTask)
 from utils import (CITIES, FILENAME, FINISH_HOUR, START_HOURS, get_logger,
@@ -15,8 +16,11 @@ def forecast_weather():
     """
     count_workers = len(CITIES)
     logger.debug("Thread workers count %s", count_workers)
+
+    api_client = YandexWeatherAPI()
+    fetching = DataFetchingTask(api_client=api_client)
     with ThreadPoolExecutor(max_workers=count_workers) as executor:
-        futures = executor.map(DataFetchingTask.fetch, CITIES.keys())
+        futures = executor.map(fetching.fetch, CITIES.keys())
         data = list(futures)
 
     queue = get_queue()
@@ -33,7 +37,7 @@ def forecast_weather():
         tasks_timeout = len(CITIES)
         calculation_tasks = pool.map_async(calculation.calculate, data)
         aggregation_task = pool.apply_async(aggregation.aggregate)
-        calculation_tasks.wait(timeout=tasks_timeout)
+        calculation_tasks.wait(timeout=tasks_timeout+30)
         queue.put(None)
         aggregation_task.wait()
 

@@ -1,3 +1,4 @@
+import csv
 import operator
 import os
 import sys
@@ -8,19 +9,20 @@ import pandas as pd
 from pandas import DataFrame as df
 from pandas import concat, read_csv
 
-from api_client import YandexWeatherAPI
-from models import CityModel, DataCalculationResult
+from models import CityModel
 from utils import get_logger
 
 logger = get_logger(__name__)
-
+GOOD_WEATHER = {'clear', 'partly-cloudy', 'cloudy'}
 
 class DataFetchingTask:
     """Получение данных через API."""
 
-    @staticmethod
-    def fetch(city: str) -> CityModel:
-        result = YandexWeatherAPI().get_forecasting(city)
+    def __init__(self, api_client):
+        self.api_client = api_client
+
+    def fetch(self, city: str) -> CityModel:
+        result = self.api_client.get_forecasting(city)
         logger.debug(f"API request for city:{city}")
         return CityModel(city=city, forecasts=result)
 
@@ -33,63 +35,63 @@ class DataCalculationTask:
         self.time_from: int = time_from
         self.time_till: int = time_till
 
-    def calculate(self, data: df):
+    def calculate(self, data: 'CityModel'):
         """Формирует результат для города."""
         forecasts = data.forecasts.dict()
         city_name = data.city
-        daily_stat = self.daily_stat(forecasts)
-        daily_stat.fillna("---", inplace=True)
-        total_stat = self.total_stat(daily_stat)
-
-        city = df([city_name, None], columns=["city"])
-        result = DataCalculationResult(
-            city=city, daily_averages=daily_stat, averages=total_stat
-        )
+        stat = self.get_stat(forecasts)
+        stat['city'] = city_name
         logger.debug(
-            "DataCalculationResult for city %s add in queue",
+            "DataCalculationTask result for city %s add in queue",
             city_name,
         )
-        self.queue.put(result)
-        return result
+        self.queue.put(stat)
+        return stat
 
-    def daily_stat(self, forecasts: dict) -> df:
-        """Вычисление средних значений по дням."""
-        daily_averages = df(
-            columns=["day_temp", "clear"],
-        ).transpose()
-
-        columns = ["hour", "condition", "temp"]
-        weather_condition = (
-            "condition == 'clear' | condition == 'partly-cloudy' | "
-            + "condition == 'cloudy'"
-        )
-        for day in forecasts["forecasts"]:
-            hours_day = df.from_records(
-                day["hours"],
-                columns=columns,
-            )
-            hours = hours_day.loc[
-                (hours_day["hour"] >= self.time_from)
-                & (hours_day["hour"] < self.time_till)
-            ]
-            if not hours.empty:
-                avg_day_temp = hours["temp"].mean().round(2)
-                clearly_hours = hours.query(weather_condition).agg(
-                    ["count"]
-                )["condition"]["count"]
+    def get_stat(self, forecasts: dict) -> dict:
+        """
+        Вычисление средних значений для города.
+        
+        {
+            'temp_avg': 13.82,
+            'clear_avg': 1.25,
+            'dates': {
+                '2022-05-26': {
+                    'day_temp_avg': 18.0,
+                    'hours_clear': 4,
+                },
+                ...
+            },
+        }
+        """
+        daily_averages = {'dates': {}}
+        dates = daily_averages['dates']
+        temp_avg, clear_avg, day_count = 0, 0, 0
+        for day_data in forecasts['forecasts']:
+            day_temp_avg, hours_count, hours_clear = 0, 0, 0
+            if len(day_data['hours']):
+                for hour_data in day_data['hours']:
+                    if self.time_from <= hour_data['hour'] < self.time_till:
+                        day_temp_avg += hour_data['temp']
+                        hours_count += 1
+                        if hour_data['condition'] in GOOD_WEATHER:
+                            hours_clear += 1
+                day_temp_avg = round((day_temp_avg / hours_count), 1) if hours_count else None
+                if day_temp_avg:
+                    temp_avg += day_temp_avg
+                clear_avg += hours_clear
+                day_count += 1
             else:
-                avg_day_temp = None
-                clearly_hours = None
-            daily_averages.loc["day_temp", day["date"]] = avg_day_temp
-            daily_averages.loc["clear", day["date"]] = clearly_hours
-        return daily_averages
+                day_temp_avg = None
+                hours_clear = None
+            day_stat = {'day_temp_avg': day_temp_avg, 'hours_clear': hours_clear}
+            dates[day_data['date']] = day_stat
 
-    def total_stat(self, data: df) -> df:
-        """Вычисление итоговых средних."""
-        return df(
-            data.mean(axis="columns", numeric_only=True).round(2).transpose(),
-            columns=["total_average"],
-        )
+        temp_avg = round((temp_avg / day_count), 2) if temp_avg and day_count else None
+        clear_avg = round((clear_avg / day_count), 2) if day_count else None
+        daily_averages['temp_avg'] = temp_avg
+        daily_averages['clear_avg'] = clear_avg
+        return daily_averages
 
 
 class DataAggregationTask:
@@ -106,7 +108,7 @@ class DataAggregationTask:
             logger.debug("Old file removed %s", filename)
         return filename
 
-    def aggregate(self, data: df = None):
+    def aggregate(self, data: dict = None):
         """Соединение данных."""
         if data:
             return self.save_to_file(data=data)
@@ -114,8 +116,8 @@ class DataAggregationTask:
         queue_item = self.queue.get()
         while queue_item:
             logger.debug(
-                "DataCalculationResult for city %s get from queue",
-                queue_item.city.at[0, "city"],
+                'DataCalculationTask result for city %s get from queue',
+                queue_item['city'],
             )
             self.save_to_file(data=queue_item)
             queue_item = self.queue.get()
@@ -126,23 +128,21 @@ class DataAggregationTask:
 
     def save_to_file(self, data):
         """Сохранение данных в файл."""
-        with open(self.filename, "a+", encoding="utf-8") as file:
-            city = data.city.rename(columns={"city": "Город/день"})
-            daily = data.daily_averages.rename(
-                index={"day_temp": "Температура, среднее",
-                       "clear": "Без осадков, часов"}
-            ).reset_index().rename(columns={"index": ""})
-            averages = data.averages.rename(
-                columns={"total_average": "Среднее"}).set_axis([0, 1])
+        with open(self.filename, 'a+', newline='', encoding='utf-8') as csvfile:
+            dates_list = list(data['dates'].keys())
+            data_writer = csv.writer(csvfile)
 
-            data_to_save = concat([city, daily, averages], axis=1)
-            header_enabled = self.check_empty_file()
-            data_to_save.to_csv(
-                file,
-                na_rep="",
-                index=False,
-                header=header_enabled,
-            )
+            if self.check_empty_file():
+                headers = ['Город/день', ''] + dates_list + ['Среднее']
+                data_writer.writerow(headers)
+
+            day_temp_avg_list = [data['dates'][temp]['day_temp_avg'] if data['dates'][temp]['day_temp_avg'] else "---" for temp in dates_list]
+            first_row = [data['city'], 'Температура, среднее'] + day_temp_avg_list + [data['temp_avg']]
+
+            hours_clear_list = [data['dates'][temp]['hours_clear'] if data['dates'][temp]['hours_clear'] is not None else "---" for temp in dates_list]
+            second_line = ['', 'Без осадков, часов'] + hours_clear_list + [data['clear_avg']]
+            data_writer.writerow(first_row)
+            data_writer.writerow(second_line)
 
 
 class DataAnalyzingTask:
