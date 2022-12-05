@@ -24,6 +24,7 @@ MIN_MAJOR_PYTHON_VER = 3
 MIN_MINOR_PYTHON_VER = 9
 
 FILENAME = "aggregation.csv"
+GOOD_WEATHER = {'clear', 'partly-cloudy', 'cloudy'}
 START_HOURS = 9
 FINISH_HOUR = 19
 

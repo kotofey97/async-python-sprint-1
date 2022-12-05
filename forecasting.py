@@ -37,7 +37,7 @@ def forecast_weather():
         tasks_timeout = len(CITIES)
         calculation_tasks = pool.map_async(calculation.calculate, data)
         aggregation_task = pool.apply_async(aggregation.aggregate)
-        calculation_tasks.wait(timeout=tasks_timeout+30)
+        calculation_tasks.wait(timeout=tasks_timeout)
         queue.put(None)
         aggregation_task.wait()
 

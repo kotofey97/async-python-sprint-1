@@ -5,15 +5,11 @@ import sys
 from multiprocessing import Queue
 from typing import Any, List, Tuple
 
-import pandas as pd
-from pandas import DataFrame as df
-from pandas import concat, read_csv
-
 from models import CityModel
-from utils import get_logger
+from utils import GOOD_WEATHER, get_logger
 
 logger = get_logger(__name__)
-GOOD_WEATHER = {'clear', 'partly-cloudy', 'cloudy'}
+
 
 class DataFetchingTask:
     """Получение данных через API."""
@@ -163,12 +159,7 @@ class DataAnalyzingTask:
     def analyze(self):
         """Анализ данных."""
         cities, ratings = self.get_cities_ratings()
-        ratings_df = self.get_ratings_df(ratings)
-
-        aggregation = pd.read_csv(self.filename).rename(
-            columns=lambda i: "" if i.startswith("Unnamed") else i)
-        full = pd.concat([aggregation, ratings_df], axis=1)
-        full.to_csv(self.filename, na_rep="", index=False, encoding="utf-8")
+        self.save_rating(ratings)
 
         top = min(ratings)
         best_city = [idx for idx, rating in enumerate(ratings) if rating == top]
@@ -176,35 +167,46 @@ class DataAnalyzingTask:
 
     def get_cities_ratings(self) -> Tuple[List[Any], List[int]]:
         """Получение рейтинга городов."""
-        df = read_csv(self.filename, usecols=["Город/день", "Среднее"])
-        final_df = concat(
-            [
-                df[::2]["Среднее"].reset_index(drop=True),
-                df[1::2]["Среднее"].reset_index(drop=True),
-            ],
-            axis=1,
-        )
-        cities_list = list(df[::2]["Город/день"])
-        data_to_rank = list(final_df.itertuples(index=False, name=None))
+        data_to_rank = ()
+        cities_list, ratings = [], []
+        temp_list, clear_list = [], []
+        with open(self.filename, encoding='utf-8') as csvfile:
+            file_reader = csv.reader(csvfile, delimiter = ",")
+            count_row = 0
+            for row in file_reader:
+                if count_row % 2:
+                    cities_list.append(row[0])
+                    temp_list.append(float(row[-1]))
+                elif not count_row % 2 and count_row > 0:
+                    clear_list.append(float(row[-1]))
+                count_row+=1
 
+        data_to_rank = list(zip(temp_list, clear_list))
         data_sorted = sorted(
-            list(set(data_to_rank)),
-            key=lambda item: (item[0], item[1]),
+            data_to_rank,
+            key=lambda item: item[0] + item[1],
             reverse=True
         )
         ratings = [data_sorted.index(idx) + 1 for idx in data_to_rank]
         return cities_list, ratings
 
-    def get_ratings_df(self, ratings_list: list) -> df:
-        """Подготовка датафрейма для объединения с основным."""
-        ratings_tmp = df(ratings_list, columns=["Рейтинг"])
-        ratings_len = len(ratings_tmp) * 2
-        ratings_tmp.index = pd.RangeIndex(0, ratings_len, 2)
-        ratings_zeros = pd.DataFrame(
-            0,
-            index=pd.RangeIndex(1, ratings_len, 2),
-            columns=["Рейтинг"],
-        )
-        ratings = pd.concat([ratings_tmp, ratings_zeros]).sort_index()
-        ratings.replace(0, "", inplace=True)
-        return ratings
+    def save_rating(self, rating):
+        """Добавление столбика с рейтингом"""
+        file_data = []
+        with open(self.filename, mode='r', encoding='utf-8') as csvfile:
+            file_reader = csv.reader(csvfile, delimiter = ",")
+            for row in file_reader:
+                file_data.append(row)
+
+        with open(self.filename, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            count_row = 0
+            rate_ind = 0
+            for row in file_data:
+                if count_row == 0:
+                    row.append('Рейтинг')
+                elif count_row % 2:
+                    row.append(rating[rate_ind])
+                    rate_ind +=1
+                count_row += 1
+                writer.writerow(row)
