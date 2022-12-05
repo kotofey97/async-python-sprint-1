@@ -3,7 +3,7 @@ import operator
 import os
 import sys
 from multiprocessing import Queue
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from models import CityModel
 from utils import GOOD_WEATHER, get_logger
@@ -47,7 +47,7 @@ class DataCalculationTask:
     def get_stat(self, forecasts: dict) -> dict:
         """
         Вычисление средних значений для города.
-        
+
         {
             'temp_avg': 13.82,
             'clear_avg': 1.25,
@@ -60,11 +60,12 @@ class DataCalculationTask:
             },
         }
         """
-        daily_averages = {'dates': {}}
+        daily_averages: dict = {'dates': {}}
         dates = daily_averages['dates']
         temp_avg, clear_avg, day_count = 0, 0, 0
         for day_data in forecasts['forecasts']:
-            day_temp_avg, hours_count, hours_clear = 0, 0, 0
+            day_temp_avg: Optional[float] = 0
+            hours_count, hours_clear = 0, 0
             if len(day_data['hours']):
                 for hour_data in day_data['hours']:
                     if self.time_from <= hour_data['hour'] < self.time_till:
@@ -72,22 +73,27 @@ class DataCalculationTask:
                         hours_count += 1
                         if hour_data['condition'] in GOOD_WEATHER:
                             hours_clear += 1
-                day_temp_avg = round((day_temp_avg / hours_count), 1) if hours_count else None
+                day_temp_avg = self.get_avg(
+                    day_temp_avg, hours_count, 1
+                ) if hours_count else None
                 if day_temp_avg:
                     temp_avg += day_temp_avg
                 clear_avg += hours_clear
                 day_count += 1
+                day_stat = {'day_temp_avg': day_temp_avg, 'hours_clear': hours_clear}
             else:
-                day_temp_avg = None
-                hours_clear = None
-            day_stat = {'day_temp_avg': day_temp_avg, 'hours_clear': hours_clear}
+                day_stat = {'day_temp_avg': None, 'hours_clear': None}
             dates[day_data['date']] = day_stat
 
-        temp_avg = round((temp_avg / day_count), 2) if temp_avg and day_count else None
-        clear_avg = round((clear_avg / day_count), 2) if day_count else None
+        temp_avg = self.get_avg(temp_avg, day_count, 2) if temp_avg and day_count else None
+        clear_avg = self.get_avg(clear_avg, day_count, 2) if day_count else None
         daily_averages['temp_avg'] = temp_avg
         daily_averages['clear_avg'] = clear_avg
         return daily_averages
+
+    @staticmethod
+    def get_avg(sum, count, digits):
+        return round((sum / count), digits)
 
 
 class DataAggregationTask:
@@ -104,7 +110,7 @@ class DataAggregationTask:
             logger.debug("Old file removed %s", filename)
         return filename
 
-    def aggregate(self, data: dict = None):
+    def aggregate(self, data: Optional[dict] = None):
         """Соединение данных."""
         if data:
             return self.save_to_file(data=data)
@@ -132,13 +138,26 @@ class DataAggregationTask:
                 headers = ['Город/день', ''] + dates_list + ['Среднее']
                 data_writer.writerow(headers)
 
-            day_temp_avg_list = [data['dates'][temp]['day_temp_avg'] if data['dates'][temp]['day_temp_avg'] else "---" for temp in dates_list]
-            first_row = [data['city'], 'Температура, среднее'] + day_temp_avg_list + [data['temp_avg']]
+            day_temp_avg_list = [
+                data['dates'][temp]['day_temp_avg']
+                if data['dates'][temp]['day_temp_avg'] else "---"
+                for temp in dates_list
+            ]
+            first_row = [data['city'], 'Температура, среднее']
+            first_row.extend(day_temp_avg_list)
+            first_row.append(data['temp_avg'])
 
-            hours_clear_list = [data['dates'][temp]['hours_clear'] if data['dates'][temp]['hours_clear'] is not None else "---" for temp in dates_list]
-            second_line = ['', 'Без осадков, часов'] + hours_clear_list + [data['clear_avg']]
+            hours_clear_list = [
+                data['dates'][temp]['hours_clear']
+                if data['dates'][temp]['hours_clear'] is not None else "---"
+                for temp in dates_list
+            ]
+            second_row = ['', 'Без осадков, часов']
+            second_row.extend(hours_clear_list)
+            second_row.append(data['clear_avg'])
+
             data_writer.writerow(first_row)
-            data_writer.writerow(second_line)
+            data_writer.writerow(second_row)
 
 
 class DataAnalyzingTask:
@@ -167,11 +186,10 @@ class DataAnalyzingTask:
 
     def get_cities_ratings(self) -> Tuple[List[Any], List[int]]:
         """Получение рейтинга городов."""
-        data_to_rank = ()
         cities_list, ratings = [], []
         temp_list, clear_list = [], []
         with open(self.filename, encoding='utf-8') as csvfile:
-            file_reader = csv.reader(csvfile, delimiter = ",")
+            file_reader = csv.reader(csvfile, delimiter=",")
             count_row = 0
             for row in file_reader:
                 if count_row % 2:
@@ -179,7 +197,7 @@ class DataAnalyzingTask:
                     temp_list.append(float(row[-1]))
                 elif not count_row % 2 and count_row > 0:
                     clear_list.append(float(row[-1]))
-                count_row+=1
+                count_row += 1
 
         data_to_rank = list(zip(temp_list, clear_list))
         data_sorted = sorted(
@@ -194,7 +212,7 @@ class DataAnalyzingTask:
         """Добавление столбика с рейтингом"""
         file_data = []
         with open(self.filename, mode='r', encoding='utf-8') as csvfile:
-            file_reader = csv.reader(csvfile, delimiter = ",")
+            file_reader = csv.reader(csvfile, delimiter=",")
             for row in file_reader:
                 file_data.append(row)
 
@@ -207,6 +225,6 @@ class DataAnalyzingTask:
                     row.append('Рейтинг')
                 elif count_row % 2:
                     row.append(rating[rate_ind])
-                    rate_ind +=1
+                    rate_ind += 1
                 count_row += 1
                 writer.writerow(row)
