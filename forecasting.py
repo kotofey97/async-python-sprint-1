@@ -36,11 +36,10 @@ def forecast_weather():
     with Pool(processes=workers_cpu) as pool:
         tasks_timeout = len(CITIES)
         calculation_tasks = pool.map_async(calculation.calculate, data)
-        aggregation_task = pool.apply_async(aggregation.aggregate)
         calculation_tasks.wait(timeout=tasks_timeout)
         queue.put(None)
-        aggregation_task.wait()
 
+    aggregation.aggregate()
     analyze = DataAnalyzingTask(filename=FILENAME)
     analyze.analyze()
     comfortables = analyze.comfortables

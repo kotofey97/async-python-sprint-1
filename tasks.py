@@ -2,6 +2,8 @@ import csv
 import operator
 import os
 import sys
+from threading import Lock, current_thread
+from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import Queue
 from typing import Any, List, Optional, Tuple
 
@@ -122,21 +124,25 @@ class DataAggregationTask:
         if data:
             return self.save_to_file(data=data)
 
-        queue_item = self.queue.get()
-        while queue_item:
-            logger.debug(
-                'DataCalculationTask result for city %s get from queue',
-                queue_item['city'],
-            )
-            self.save_to_file(data=queue_item)
-            queue_item = self.queue.get()
+        lock = Lock()
+        with ThreadPoolExecutor(max_workers=15) as executor:
+            while queue_item := self.queue.get():
+                logger.debug(
+                    'DataCalculationTask result for city %s get from queue',
+                    queue_item['city'],
+                )
+                executor.submit(self.save_to_file, queue_item, lock)
 
     def check_empty_file(self) -> bool:
         """Проверка пустой файл или нет."""
         return os.path.getsize(self.filename) == 0
 
-    def save_to_file(self, data):
+    def save_to_file(self, data, lock=None):
         """Сохранение данных в файл."""
+        if lock:
+            lock.acquire()
+        thread_name = current_thread().name
+        logger.debug("Поток %s запустился", thread_name)
         with open(self.filename, 'a+', newline='', encoding='utf-8') as file:
             dates_list = list(data['dates'].keys())
             data_writer = csv.writer(file)
@@ -165,6 +171,8 @@ class DataAggregationTask:
 
             data_writer.writerow(first_row)
             data_writer.writerow(second_row)
+        if lock:
+            lock.release()
 
 
 class DataAnalyzingTask:
