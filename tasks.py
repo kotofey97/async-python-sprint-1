@@ -80,13 +80,20 @@ class DataCalculationTask:
                     temp_avg += day_temp_avg
                 clear_avg += hours_clear
                 day_count += 1
-                day_stat = {'day_temp_avg': day_temp_avg, 'hours_clear': hours_clear}
+                day_stat = {
+                    'day_temp_avg': day_temp_avg,
+                    'hours_clear': hours_clear,
+                }
             else:
                 day_stat = {'day_temp_avg': None, 'hours_clear': None}
             dates[day_data['date']] = day_stat
 
-        temp_avg = self.get_avg(temp_avg, day_count, 2) if temp_avg and day_count else None
-        clear_avg = self.get_avg(clear_avg, day_count, 2) if day_count else None
+        temp_avg = self.get_avg(
+            temp_avg, day_count, 2,
+        ) if temp_avg and day_count else None
+        clear_avg = self.get_avg(
+            clear_avg, day_count, 2,
+        ) if day_count else None
         daily_averages['temp_avg'] = temp_avg
         daily_averages['clear_avg'] = clear_avg
         return daily_averages
@@ -130,9 +137,9 @@ class DataAggregationTask:
 
     def save_to_file(self, data):
         """Сохранение данных в файл."""
-        with open(self.filename, 'a+', newline='', encoding='utf-8') as csvfile:
+        with open(self.filename, 'a+', newline='', encoding='utf-8') as file:
             dates_list = list(data['dates'].keys())
-            data_writer = csv.writer(csvfile)
+            data_writer = csv.writer(file)
 
             if self.check_empty_file():
                 headers = ['Город/день', ''] + dates_list + ['Среднее']
@@ -179,17 +186,22 @@ class DataAnalyzingTask:
         """Анализ данных."""
         cities, ratings = self.get_cities_ratings()
         self.save_rating(ratings)
+        self.set_comfortables(cities, ratings)
 
+    def set_comfortables(self, cities, ratings):
+        """Определение комфортных городов."""
         top = min(ratings)
-        best_city = [idx for idx, rating in enumerate(ratings) if rating == top]
+        best_city = [
+            idx for idx, rating in enumerate(ratings) if rating == top
+        ]
         self.comfortables = operator.itemgetter(*best_city)(cities)
 
     def get_cities_ratings(self) -> Tuple[List[Any], List[int]]:
         """Получение рейтинга городов."""
         cities_list, ratings = [], []
         temp_list, clear_list = [], []
-        with open(self.filename, encoding='utf-8') as csvfile:
-            file_reader = csv.reader(csvfile, delimiter=",")
+        with open(self.filename, encoding='utf-8') as file:
+            file_reader = csv.reader(file, delimiter=",")
             count_row = 0
             for row in file_reader:
                 if count_row % 2:
@@ -211,13 +223,13 @@ class DataAnalyzingTask:
     def save_rating(self, rating):
         """Добавление столбика с рейтингом"""
         file_data = []
-        with open(self.filename, mode='r', encoding='utf-8') as csvfile:
-            file_reader = csv.reader(csvfile, delimiter=",")
+        with open(self.filename, mode='r', encoding='utf-8') as file:
+            file_reader = csv.reader(file, delimiter=",")
             for row in file_reader:
                 file_data.append(row)
 
-        with open(self.filename, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.writer(csvfile)
+        with open(self.filename, 'w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
             count_row = 0
             rate_ind = 0
             for row in file_data:
